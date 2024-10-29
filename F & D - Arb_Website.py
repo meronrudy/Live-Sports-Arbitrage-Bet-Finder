@@ -12,13 +12,14 @@ from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.keys import Keys
 import nashpy as nash
 import numpy as np
+import requests
 
 logging.disable(logging.CRITICAL)
 
 class ArbFinder(object):
     """docstring for ClassName"""
 
-    def __init__(self, URL):
+    def __init__(self, URL, api_key):
         try:
             # Setup ChromeDriver
             self.URL = URL
@@ -29,6 +30,7 @@ class ArbFinder(object):
         except:
             pass
         self.sport = 'Baseball'
+        self.api_key = api_key
 
     def set_type(self, ASK=0, BID=1):
         # time.sleep(1)
@@ -47,6 +49,21 @@ class ArbFinder(object):
         except Exception as e:
             print(e)
 
+    def fetch_odds_from_api(self, sport):
+        url = f'https://api.the-odds-api.com/v4/sports/{sport}/odds'
+        params = {
+            'apiKey': '81e7ae304c20c6a62bd1279d3e1e78a2',
+            'regions': 'us',
+            'markets': 'h2h',
+            'oddsFormat': 'american'
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Failed to fetch odds: {response.status_code}")
+            return None
+
 class App(object):
     def __init__(self):
         global URL
@@ -60,12 +77,13 @@ class App(object):
         self.bet_limit = 0.10  # Most websites require a minimum of $0.10 a wager on each bet
         self.odds_limit = 750  # The upper odds limit that you want to wager on (i.e. +750)
 
-        self.ask = ArbFinder('https://sportsbook.fanduel.com/live')
+        self.api_key = '81e7ae304c20c6a62bd1279d3e1e78a2'  # Replace with your actual API key
+        self.ask = ArbFinder('https://sportsbook.fanduel.com/live', self.api_key)
         self.ask.driver.implicitly_wait(5)
         self.ask.set_type(ASK=1, BID=0)
         self.running = False
 
-        self.bid = ArbFinder('https://sportsbook.draftkings.com/live')
+        self.bid = ArbFinder('https://sportsbook.draftkings.com/live', self.api_key)
         self.bid.driver.implicitly_wait(5)
         self.bid.set_type(ASK=0, BID=1)
         self.running = False
@@ -92,99 +110,35 @@ class App(object):
             match number:
                 # Find live odds from the website
                 case 1:
-                    self.bid.results = self.bid.driver.find_elements(By.XPATH,
-                         "(//tbody[@class='sportsbook-table__body'])[1]//tr")
-                    for i in range(0, len(self.bid.results), 2):
-                        self.team1_bid, self.team2_bid = \
-                            self.bid.results[i], self.bid.results[i + 1]
+                    odds_data = self.bid.fetch_odds_from_api('baseball')
+                    if odds_data:
+                        for match in odds_data:
+                            team1_bid = match['bookmakers'][0]['markets'][0]['outcomes'][0]['name']
+                            team2_bid = match['bookmakers'][0]['markets'][0]['outcomes'][1]['name']
+                            team1_wagers_bid = match['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
+                            team2_wagers_bid = match['bookmakers'][0]['markets'][0]['outcomes'][1]['price']
 
-                        self.team1_wagers_bid, self.team2_wagers_bid = \
-                            self.team1_bid.find_elements(By.XPATH, self.wagers), \
-                            self.team2_bid.find_elements(By.XPATH, self.wagers)
-
-                        self.team1_bid, self.team2_bid = \
-                            self.team1_bid.find_element(By.XPATH, self.find_name).text, \
-                            self.team2_bid.find_element(By.XPATH, self.find_name).text
-
-                        if 'Sox' in self.team1_bid:
-                            self.team1_bid = ' '.join(self.team1_bid.split(' ')[-2:])
-                        else:
-                            self.team1_bid = self.team1_bid.split(' ')[-1]
-
-                        if 'Sox' in self.team2_bid:
-                            self.team2_bid = ' '.join(self.team2_bid.split(' ')[-2:])
-                        else:
-                            self.team2_bid = self.team2_bid.split(' ')[-1]
-
-                        self.bid_wager_1_first, \
-                        self.bid_wager_2_first, \
-                        self.bid_wager_1_second, \
-                        self.bid_wager_2_second, \
-                        self.bid_wager_1_third, \
-                        self.bid_wager_2_third = \
-                            self.team1_wagers_bid[0], \
-                            self.team2_wagers_bid[0], \
-                            self.team1_wagers_bid[2], \
-                            self.team2_wagers_bid[2], \
-                            self.team1_wagers_bid[1], \
-                            self.team2_wagers_bid[1]
-
-                        self.bid_wager_1_first = ('' if 'disabled' in self.bid_wager_1_first.get_attribute('innerHTML') else self.bid_wager_1_first.text.replace('\n', ' '))
-                        self.bid_wager_2_first = ('' if 'disabled' in self.bid_wager_2_first.get_attribute('innerHTML') else self.bid_wager_2_first.text.replace('\n', ' '))
-                        self.bid_wager_1_second = ('' if 'disabled' in self.bid_wager_1_second.get_attribute('innerHTML') else self.bid_wager_1_second.text.replace('\n', ' '))
-                        self.bid_wager_2_second = ('' if 'disabled' in self.bid_wager_2_second.get_attribute('innerHTML') else self.bid_wager_2_second.text.replace('\n', ' '))
-                        self.bid_wager_1_third = ('' if 'disabled' in self.bid_wager_1_third.get_attribute('innerHTML') else self.bid_wager_1_third.text.replace('\n', ' '))
-                        self.bid_wager_2_third = ('' if 'disabled' in self.bid_wager_2_third.get_attribute('innerHTML') else self.bid_wager_2_third.text.replace('\n', ' '))
-
-                        self.l2[self.team1_bid.lower() + " vs "
-                                + self.team2_bid.lower()] = \
-                            [
-                                [self.bid_wager_1_first.replace('  ', ' '),
-                                 self.bid_wager_2_first.replace('  ', ' ')],
-                                [self.bid_wager_1_second.replace('  ', ' '),
-                                 self.bid_wager_2_second.replace('  ', ' ')],
-                                [self.bid_wager_1_third.replace('  ', ' '),
-                                 self.bid_wager_2_third.replace('  ', ' ')],
-                                self.team1_bid,
-                                self.team2_bid
+                            self.l2[team1_bid.lower() + " vs " + team2_bid.lower()] = [
+                                team1_wagers_bid,
+                                team2_wagers_bid,
+                                team1_bid,
+                                team2_bid
                             ]
-                    self.bid.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.CONTROL + Keys.HOME)
                 # Find live odds from the website
                 case 2:
-                    self.ask.results = self.ask.driver.find_elements(By.XPATH,
-                         "//a[@target='_self' and contains(@title,'@') and not(contains(.,'live event'))]/..")
-                    for n, el in enumerate(self.ask.results):
-                        self.ask_teams = self.ask.results[n].find_elements(By.XPATH, self.teams)
-                        self.team1_ask, self.team2_ask = \
-                            self.ask_teams[0].text, self.ask_teams[1].text
+                    odds_data = self.ask.fetch_odds_from_api('baseball')
+                    if odds_data:
+                        for match in odds_data:
+                            team1_ask = match['bookmakers'][0]['markets'][0]['outcomes'][0]['name']
+                            team2_ask = match['bookmakers'][0]['markets'][0]['outcomes'][1]['name']
+                            team1_wagers_ask = match['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
+                            team2_wagers_ask = match['bookmakers'][0]['markets'][0]['outcomes'][1]['price']
 
-                        if 'Sox' in self.team1_ask:
-                            self.team1_ask = ' '.join(self.team1_ask.split(' ')[-2:])
-                        else:
-                            self.team1_ask = self.team1_ask.split(' ')[-1]
-
-                        if 'Sox' in self.team2_ask:
-                            self.team2_ask = ' '.join(self.team2_ask.split(' ')[-2:])
-                        else:
-                            self.team2_ask = self.team2_ask.split(' ')[-1]
-
-                        self.ask_team_wager = self.ask.results[n].find_elements(By.XPATH, self.second_wagers)
-                        self.team1_wagers_ask, self.team2_wagers_ask = \
-                            self.ask_team_wager[0], self.ask_team_wager[1]
-                        self.team1_wagers_ask, self.team2_wagers_ask = \
-                            self.team1_wagers_ask.find_elements(By.XPATH, "./div"), \
-                            self.team2_wagers_ask.find_elements(By.XPATH, "./div")
-
-                        self.l1[self.team1_ask.lower() + " vs " + self.team2_ask.lower()] = \
-                            [
-                                [self.team1_wagers_ask[0].text.replace('\n', ' ').replace('  ', ' '),
-                                 self.team2_wagers_ask[0].text.replace('\n', ' ').replace('  ', ' ')],
-                                [self.team1_wagers_ask[1].text.replace('\n', ' ').replace('  ', ' '),
-                                 self.team2_wagers_ask[1].text.replace('\n', ' ').replace('  ', ' ')],
-                                [self.team1_wagers_ask[2].text.replace('\n', ' ').replace('  ', ' '),
-                                 self.team2_wagers_ask[2].text.replace('\n', ' ').replace('  ', ' ')],
-                                self.team1_ask,
-                                self.team2_ask
+                            self.l1[team1_ask.lower() + " vs " + team2_ask.lower()] = [
+                                team1_wagers_ask,
+                                team2_wagers_ask,
+                                team1_ask,
+                                team2_ask
                             ]
                 # Find the wager to select and click it
                 case 3:
@@ -242,7 +196,7 @@ class App(object):
                 # Enter the stake amount
                 case 8:
                     self.bet_input_ask = self.ask.driver.find_element(By.XPATH, "//span[text()='WAGER']/..//input")
-                    # self.bet_input_ask.click()
+                    # self.bet_input_ask click()
                     self.bet_input_ask.send_keys(bet_amount)
                     try:
                         self.ask_button = self.ask.driver.find_element(By.XPATH,"//span[contains(text(),'Place')]/../../../..")
