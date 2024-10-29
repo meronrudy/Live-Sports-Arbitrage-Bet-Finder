@@ -12,13 +12,14 @@ from selenium.common.exceptions import StaleElementReferenceException
 from selenium.webdriver.common.keys import Keys
 import nashpy as nash
 import numpy as np
+import requests
 
 logging.disable(logging.CRITICAL)
 
 class ArbFinder(object):
     """docstring for ClassName"""
 
-    def __init__(self, URL):
+    def __init__(self, URL, api_key):
         try:
             # Setup ChromeDriver
             self.URL = URL
@@ -29,6 +30,7 @@ class ArbFinder(object):
         except:
             pass
         self.sport = 'Tennis'
+        self.api_key = api_key
 
     def set_type(self, ASK=0, BID=1):
         # time.sleep(1)
@@ -52,6 +54,21 @@ class ArbFinder(object):
         except Exception as e:
             print(e)
 
+    def fetch_odds_from_api(self, sport):
+        url = f'https://api.the-odds-api.com/v4/sports/{sport}/odds'
+        params = {
+            'apiKey': '81e7ae304c20c6a62bd1279d3e1e78a2',
+            'regions': 'us',
+            'markets': 'h2h',
+            'oddsFormat': 'american'
+        }
+        response = requests.get(url, params=params)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"Failed to fetch odds: {response.status_code}")
+            return None
+
 
 class App(object):
     def __init__(self):
@@ -66,12 +83,13 @@ class App(object):
         self.bet_limit = 0.10 # Most websites require a minimum of $0.10 a wager on each bet
         self.odds_limit = 750 # The upper odds limit that you want to wager on (i.e. +750)
 
-        self.ask = ArbFinder('https://sportsbook.fanduel.com/live')
+        self.api_key = '81e7ae304c20c6a62bd1279d3e1e78a2'  # Replace with your actual API key
+        self.ask = ArbFinder('https://sportsbook.fanduel.com/live', self.api_key)
         self.ask.driver.implicitly_wait(5)
         self.ask.set_type(ASK=1, BID=0)
         self.running = False
 
-        self.bid = ArbFinder('https://sportsbook.draftkings.com/live')
+        self.bid = ArbFinder('https://sportsbook.draftkings.com/live', self.api_key)
         self.bid.driver.implicitly_wait(5)
         self.bid.set_type(ASK=0, BID=1)
         self.running = False
@@ -98,64 +116,36 @@ class App(object):
             match number:
                 # Find live odds from the website
                 case 1:
-                    self.bid.results = self.bid.driver.find_elements(By.XPATH,
-                        "//div[contains(@class,'sportsbook-event-accordion__wrapper')]//div[contains(@class,'sportsbook-outcome-cell__body') and not(contains(@class,'disabled'))]/../../../../..")
-                    for n, el in enumerate(self.bid.results):
-                        self.result_bid = self.bid.results[n]
-                        # self.bid.driver.execute_script("arguments[0].scrollIntoView();", self.result_bid)
+                    odds_data = self.bid.fetch_odds_from_api('tennis')
+                    if odds_data:
+                        for match in odds_data:
+                            team1_bid = match['bookmakers'][0]['markets'][0]['outcomes'][0]['name']
+                            team2_bid = match['bookmakers'][0]['markets'][0]['outcomes'][1]['name']
+                            team1_wagers_bid = match['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
+                            team2_wagers_bid = match['bookmakers'][0]['markets'][0]['outcomes'][1]['price']
 
-                        self.xpath_result_bid = self.result_bid.find_elements(By.XPATH, self.find_name)
-                        self.team1_bid, \
-                        self.team2_bid = \
-                            self.xpath_result_bid[0].text.replace('-', ' '), \
-                            self.xpath_result_bid[1].text.replace('-', ' ')
-
-                        self.team1_bid, \
-                        self.team2_bid = \
-                            self.team1_bid.split(' ')[-1], \
-                            self.team2_bid.split(' ')[-1]
-
-                        self.xpath_result_bid = self.result_bid.find_elements(By.XPATH, self.wagers)
-                        self.team1_wagers_bid, \
-                        self.team2_wagers_bid = \
-                            self.xpath_result_bid[0].text, \
-                            self.xpath_result_bid[1].text
-
-                        self.l2[self.team1_bid.lower() + " vs " + self.team2_bid.lower()] = \
-                            [self.team1_wagers_bid.replace('\n', ' '),
-                             self.team2_wagers_bid.replace('\n', ' '),
-                             self.team1_bid,
-                             self.team2_bid]
-                    self.bid.driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.CONTROL + Keys.HOME)
+                            self.l2[team1_bid.lower() + " vs " + team2_bid.lower()] = [
+                                team1_wagers_bid,
+                                team2_wagers_bid,
+                                team1_bid,
+                                team2_bid
+                            ]
                 # Find live odds from the website
                 case 2:
-                    self.ask.results = self.ask.driver.find_elements(By.XPATH,
-                        "//a[@target='_self' and contains(@title,' ') and contains(.,'live event')]/..//a[@target='_self' and contains(@title,' ') and not(contains(.,'live event'))]/..")
-                    for n, el in enumerate(self.ask.results):
-                        self.result_ask = self.ask.results[n]
-                        # self.ask.driver.execute_script("arguments[0].scrollIntoView();", self.result_ask)
+                    odds_data = self.ask.fetch_odds_from_api('tennis')
+                    if odds_data:
+                        for match in odds_data:
+                            team1_ask = match['bookmakers'][0]['markets'][0]['outcomes'][0]['name']
+                            team2_ask = match['bookmakers'][0]['markets'][0]['outcomes'][1]['name']
+                            team1_wagers_ask = match['bookmakers'][0]['markets'][0]['outcomes'][0]['price']
+                            team2_wagers_ask = match['bookmakers'][0]['markets'][0]['outcomes'][1]['price']
 
-                        self.xpath_result_ask = self.result_ask.find_elements(By.XPATH, self.teams)
-                        self.team1_ask, self.team2_ask = \
-                            self.xpath_result_ask[0].find_element(By.TAG_NAME, 'span').text.replace('-', ' '), \
-                            self.xpath_result_ask[1].find_element(By.TAG_NAME, 'span').text.replace('-', ' ')
-
-                        self.team1_ask, \
-                        self.team2_ask = \
-                            self.team1_ask.split(' ')[-1], \
-                            self.team2_ask.split(' ')[-1]
-
-                        self.xpath_result_ask = self.result_ask.find_elements(By.XPATH, self.second_wagers)
-                        self.team1_wagers_ask, \
-                        self.team2_wagers_ask = \
-                            self.xpath_result_ask[0], \
-                            self.xpath_result_ask[1]
-
-                        self.l1[self.team1_ask.lower() + " vs " + self.team2_ask.lower()] = \
-                            [self.team1_wagers_ask.text.replace('\n', ' '),
-                             self.team2_wagers_ask.text.replace('\n', ' '),
-                             self.team1_ask,
-                             self.team2_ask]
+                            self.l1[team1_ask.lower() + " vs " + team2_ask.lower()] = [
+                                team1_wagers_ask,
+                                team2_wagers_ask,
+                                team1_ask,
+                                team2_ask
+                            ]
                 # Find the wager to select and click it
                 case 3:
                     self.wager1 = self.bid.driver.find_elements(By.XPATH,

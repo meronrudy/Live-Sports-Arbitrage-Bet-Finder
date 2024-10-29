@@ -61,3 +61,11 @@ self.pool.join()
 ## Additional information about the programs
 
 The programs use the naming convention "bid" and "ask." I built the programs from a framework that traded binary options and did not update the naming convention. "Bid" means DraftKings or William Hill, while "ask" means FanDuel.
+
+## Using the-odds-api
+
+To use the-odds-api to fetch odds instead of scraping websites, follow these steps:
+
+1. Sign up for an API key at [the-odds-api](https://the-odds-api.com/).
+2. Replace `'YOUR_API_KEY'` in the code with your actual API key.
+3. The programs will now fetch odds from the-odds-api instead of scraping them from the websites.
